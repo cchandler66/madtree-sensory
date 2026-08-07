@@ -4,7 +4,7 @@ import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 
 /* ============================================================================
    LINE CHECK — MadTree Oakley draft sensory program
-   Cloud-synced via Firebase. BYOD Individual Tasting.
+   Cloud-synced via Firebase. BYOD Individual Tasting + Panel Management.
    ========================================================================== */
 
 const firebaseConfig = {
@@ -76,20 +76,14 @@ const DEFAULT_SETTINGS = {
   defaultShelfDays: 120, coverageDays: 7,
 };
 
-// Expanded list so you don't have to build a complex management screen
 const SEED_TASTERS = [
-  { id: "t1", name: "Quality Manager" },
-  { id: "t2", name: "Head Brewer" },
-  { id: "t3", name: "Brewer 1" },
-  { id: "t4", name: "Brewer 2" },
-  { id: "t5", name: "Cellarman" },
-  { id: "t6", name: "Taproom Staff" },
+  { id: "t1", name: "Your Name", title: "Quality Manager", active: true },
+  { id: "t2", name: "Brewer Name", title: "Head Brewer", active: true },
 ];
 
 const SEED_TAPS = [
   { line: 1, brand: "MadTree Light Lager", style: "Light & Crisp", pkg: "", dlScore: "7.2", shelf: 120, onDeck: false },
   { line: 10, brand: "Psychopathy", style: "Hoppy", pkg: "", dlScore: "7.8", shelf: 120, onDeck: false },
-  { line: 0, brand: "High 5", style: "Hoppy", pkg: "", dlScore: "7.5", shelf: 120, onDeck: true },
 ].map((t, i) => ({ id: `tap${i + 1}`, active: true, notes: "", ...t }));
 
 /* ---------------------------------------------------------------- utilities */
@@ -366,7 +360,9 @@ function Scatter({ curve, settings }) {
 
 /* ------------------------------------------------------------------- screens */
 function Board({ a, settings, tasters, onGo }) {
-  const [selectedTasterId, setSelectedTasterId] = useState(tasters[0].id);
+  const activeTasters = tasters.filter(t => t.active);
+  const [selectedTasterId, setSelectedTasterId] = useState(activeTasters.length ? activeTasters[0].id : "");
+  
   const rows = a.tapStats.filter((s) => s.tap.active && !s.tap.onDeck).sort((x, y) => x.tap.line - y.tap.line);
   const due = rows.filter((s) => s.sinceCheck === null || s.sinceCheck > settings.coverageDays);
 
@@ -392,22 +388,20 @@ function Board({ a, settings, tasters, onGo }) {
           </div>
         </div>
         
-        {/* NEW TASTER SELECTOR */}
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
           <select 
             value={selectedTasterId} 
             onChange={(e) => setSelectedTasterId(e.target.value)} 
-            style={{ width: 180 }}
+            style={{ width: 220 }}
           >
-            {tasters.map((t) => (
-              <option key={t.id} value={t.id}>{t.name}</option>
+            {activeTasters.map((t) => (
+              <option key={t.id} value={t.id}>{t.name} - {t.title}</option>
             ))}
           </select>
-          <button className="btn" data-p="1" onClick={() => onGo(selectedTasterId)}>
+          <button className="btn" data-p="1" disabled={!selectedTasterId} onClick={() => onGo(selectedTasterId)}>
             Start a Tasting Session
           </button>
         </div>
-
       </div>
 
       <div className="lc-sec">
@@ -468,7 +462,7 @@ function TasteCard({ tap, taster, draft, set, onSubmit, idx, total, elapsed }) {
     <div className="stack">
       <div className="lc-row" style={{ justifyContent: "space-between", alignItems: "flex-end" }}>
         <div>
-          <div className="lc-k">Sample {idx + 1} of {total} · scoring as {taster.name}</div>
+          <div className="lc-k">Sample {idx + 1} of {total} · scoring as {taster.name} ({taster.title})</div>
           <div className="lc-mono" style={{ fontSize: 34, fontWeight: 600, lineHeight: 1.05 }}>{tap.brand}</div>
           <div className="dim" style={{ fontSize: 13 }}>
             Line {tap.line} · {tap.style} {tap.dlScore && <span style={{ color: "var(--amber)" }}>· DL Release Score: {tap.dlScore}</span>}
@@ -539,7 +533,6 @@ function TasteCard({ tap, taster, draft, set, onSubmit, idx, total, elapsed }) {
   );
 }
 
-// INDIVIDUAL SESSION: Only loops through the beers, no longer swapping tasters
 function Session({ taps, a, taster, onSave, onExit }) {
   const [plan, setPlan] = useState(null);
   const [customIds, setCustom] = useState([]);
@@ -555,6 +548,21 @@ function Session({ taps, a, taster, onSave, onExit }) {
     const iv = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
     return () => clearInterval(iv);
   }, [t0]);
+
+  // Graceful handling if someone clicks the "Taste" tab without selecting a taster first
+  if (!taster) {
+    return (
+      <div className="stack" style={{ maxWidth: 720 }}>
+        <div className="alert" data-t="warn">
+          <div>
+            <div className="alert-b">No Taster Selected</div>
+            <div className="alert-d">Please go back to the Board tab, select your name from the dropdown, and click "Start a Tasting Session".</div>
+          </div>
+        </div>
+        <button className="btn" data-p="1" onClick={onExit}>Back to Board</button>
+      </div>
+    );
+  }
 
   const tapById = Object.fromEntries(taps.map((t) => [t.id, t]));
 
@@ -606,7 +614,6 @@ function Session({ taps, a, taster, onSave, onExit }) {
     );
   }
 
-  // Advance to the next beer immediately, staying on the same taster
   const advanceBeer = (row) => {
     const next = [...pending, row];
     setPending(next);
@@ -683,8 +690,48 @@ function Taps({ taps, setTaps, settings }) {
   );
 }
 
+// NEW TAB: Panel Manager
+function Panel({ tasters, setTasters }) {
+  const upd = (id, patch) => setTasters(tasters.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  const add = () => setTasters([...tasters, { id: uid(), name: "", title: "", active: true }]);
+
+  return (
+    <div>
+      <div className="lc-h">Panel Management<button className="btn btn-sm" data-p="1" style={{ marginLeft: "auto" }} onClick={add}>Add a Panelist</button></div>
+      <p className="lc-lede">Add and remove staff from the sensory rotation. Anyone marked "Active" will appear in the dropdown on the main board.</p>
+      
+      <div className="tbl-wrap">
+        <table className="tbl">
+          <thead><tr>
+            <th>Name</th><th>Title / Role</th><th style={{ width: 120 }}>Status</th><th style={{ width: 34 }} />
+          </tr></thead>
+          <tbody>
+            {tasters.map((t) => (
+              <tr key={t.id} style={{ opacity: t.active ? 1 : 0.4 }}>
+                <td><input value={t.name} onChange={(e) => upd(t.id, { name: e.target.value })} style={{ padding: "5px 6px" }} placeholder="e.g. John Doe" /></td>
+                <td><input value={t.title} onChange={(e) => upd(t.id, { title: e.target.value })} style={{ padding: "5px 6px" }} placeholder="e.g. Cellarman" /></td>
+                <td>
+                  <select value={t.active ? "active" : "off"} onChange={(e) => upd(t.id, { active: e.target.value === "active" })} style={{ padding: "5px 6px" }}>
+                    <option value="active">Active</option>
+                    <option value="off">Inactive</option>
+                  </select>
+                </td>
+                <td><button className="btn btn-sm" data-ghost="1" onClick={() => setTasters(tasters.filter((x) => x.id !== t.id))}>×</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function Data({ a, results, taps, settings, tasters }) {
-  const tasterName = (id) => tasters.find((t) => t.id === id)?.name || id;
+  const tasterDetails = (id) => {
+    const found = tasters.find((t) => t.id === id);
+    return found ? `${found.name} (${found.title})` : id;
+  };
+  
   const exportCsv = () => {
     const head = ["date", "session", "line", "brand", "style", "package_date", "dl_score",
       "days_since_package", "taster", "true_to_brand", "miss_modalities", "liking",
@@ -694,7 +741,7 @@ function Data({ a, results, taps, settings, tasters }) {
     for (const r of results.slice().sort((x, y) => x.date.localeCompare(y.date))) {
       const t = tapById[r.tapId] || {};
       lines.push([
-        r.date, r.sessionId, t.line, t.brand, t.style, r.pkg, r.dlScore, r.ageDays, tasterName(r.tasterId),
+        r.date, r.sessionId, t.line, t.brand, t.style, r.pkg, r.dlScore, r.ageDays, tasterDetails(r.tasterId),
         r.ttb, (r.modalities || []).join("|"), r.liking,
         (r.faults || []).map((f) => `${FAULTS.find((d) => d.id === f.id)?.label || f.id}:${f.i}`).join("|"),
         (r.faults || []).map((f) => FAULTS.find((d) => d.id === f.id)?.origin || "").join("|"),
@@ -787,7 +834,7 @@ function Data({ a, results, taps, settings, tasters }) {
             <tbody>
               {a.tasterStats.map((t) => (
                 <tr key={t.tasterId}>
-                  <td>{tasterName(t.tasterId)}</td>
+                  <td>{tasterDetails(t.tasterId)}</td>
                   <td className="n dim">{t.n}</td>
                   <td className="n">{t.mean === null ? "—" : t.mean.toFixed(2)}</td>
                   <td className="n">{t.bias === null ? "—" : (t.bias > 0 ? "+" : "") + t.bias.toFixed(2)}</td>
@@ -803,22 +850,26 @@ function Data({ a, results, taps, settings, tasters }) {
   );
 }
 
-const TABS = [["board", "Board"], ["session", "Taste"], ["taps", "Taps"], ["data", "Data"]];
+const TABS = [["board", "Board"], ["session", "Taste"], ["taps", "Taps"], ["panel", "Panel"], ["data", "Data"]];
 
 export default function LineCheck() {
   const [tab, setTab] = useState("board");
   const [loaded, setLoaded] = useState(false);
   const [syncStatus, setSync] = useState("checking");
+  
+  // Track our data arrays
   const [taps, setTaps] = useState(SEED_TAPS);
-  const [tasters] = useState(SEED_TASTERS);
+  const [tasters, setTasters] = useState(SEED_TASTERS);
+  
   const [settings] = useState(DEFAULT_SETTINGS);
   const [results, setResults] = useState([]);
   
-  // New state to hold the specific taster doing the current session
+  // Track the specific taster doing the current session
   const [activeTasterId, setActiveTasterId] = useState(null);
 
   const dirty = useRef(false);
 
+  // Load from Firebase on boot
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -826,11 +877,13 @@ export default function LineCheck() {
       if (!alive) return;
       if (core) {
         setTaps(core.taps?.length ? core.taps : SEED_TAPS);
+        setTasters(core.tasters?.length ? core.tasters : SEED_TASTERS); // Load tasters!
+        
         const ms = (core.months || []).slice(-18);
         const chunks = await Promise.all(ms.map((m) => sGet(K_RES(m))));
         if (alive) { setResults(chunks.filter(Boolean).flat()); setSync("synced"); }
       } else {
-        const ok = await sSet(K_CORE, { taps: SEED_TAPS, months: [ymOf(todayISO())] });
+        const ok = await sSet(K_CORE, { taps: SEED_TAPS, tasters: SEED_TASTERS, months: [ymOf(todayISO())] });
         if (alive) setSync(ok ? "synced" : "error");
       }
       if (alive) setLoaded(true);
@@ -838,17 +891,18 @@ export default function LineCheck() {
     return () => { alive = false; };
   }, []);
 
+  // Save to Firebase whenever Taps or Tasters change
   useEffect(() => {
     if (!loaded) return;
     dirty.current = true;
     const id = setTimeout(async () => {
       const months = [...new Set(results.map(r => ymOf(r.date))), ymOf(todayISO())];
-      const ok = await sSet(K_CORE, { taps, months });
+      const ok = await sSet(K_CORE, { taps, tasters, months });
       setSync(ok ? "synced" : "error");
       dirty.current = false;
     }, 1000);
     return () => clearTimeout(id);
-  }, [taps, loaded, results]);
+  }, [taps, tasters, loaded, results]);
 
   const saveSession = useCallback(async (rows, meta) => {
     const ym = ymOf(meta.date);
@@ -885,6 +939,9 @@ export default function LineCheck() {
         {tab === "session" && <Session taps={taps} a={a} taster={tasters.find(t => t.id === activeTasterId)} onSave={saveSession} onExit={() => setTab("board")} />}
         
         {tab === "taps" && <Taps taps={taps} setTaps={setTaps} settings={settings} />}
+        
+        {tab === "panel" && <Panel tasters={tasters} setTasters={setTasters} />}
+
         {tab === "data" && <Data a={a} results={results} taps={taps} settings={settings} tasters={tasters} />}
       </div>
     </div>
