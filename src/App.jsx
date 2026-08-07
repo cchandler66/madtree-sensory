@@ -4,7 +4,7 @@ import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 
 /* ============================================================================
    LINE CHECK — MadTree Oakley draft sensory program
-   Cloud-synced via Firebase. Includes Data Tracking & Batch Tracking.
+   Cloud-synced via Firebase. BYOD Individual Tasting.
    ========================================================================== */
 
 const firebaseConfig = {
@@ -49,8 +49,6 @@ const HEDONIC_ANCHORS = {
   7: "Like moderately", 8: "Like very much", 9: "Like extremely",
 };
 
-const MODALITIES = ["Appearance", "Aroma", "Flavor", "Mouthfeel", "Finish"];
-
 const FAULTS = [
   { id: "papery", label: "Papery / cardboard", origin: "B", cause: "Oxidation. Check packaging DO, keg headspace, age." },
   { id: "sherry", label: "Sherry / stale toffee", origin: "B", cause: "Advanced staling. Usually age + warm storage." },
@@ -78,9 +76,14 @@ const DEFAULT_SETTINGS = {
   defaultShelfDays: 120, coverageDays: 7,
 };
 
+// Expanded list so you don't have to build a complex management screen
 const SEED_TASTERS = [
-  { id: "t1", name: "Quality Manager", short: "QM", status: "trained" },
-  { id: "t2", name: "Head Brewer", short: "HB", status: "trained" },
+  { id: "t1", name: "Quality Manager" },
+  { id: "t2", name: "Head Brewer" },
+  { id: "t3", name: "Brewer 1" },
+  { id: "t4", name: "Brewer 2" },
+  { id: "t5", name: "Cellarman" },
+  { id: "t6", name: "Taproom Staff" },
 ];
 
 const SEED_TAPS = [
@@ -219,7 +222,6 @@ function analyze(taps, results, settings) {
   }
 
   const tapStats = taps.map((t) => {
-    // Current batch tracking: only look at scores where the package date matches the active tap setup
     const rs = results.filter((r) => r.tapId === t.id && r.pkg === t.pkg).sort((a, b) => b.date.localeCompare(a.date));
     const likes = rs.map((r) => r.liking).filter((x) => typeof x === "number");
     const last = rs[0];
@@ -249,7 +251,6 @@ function analyze(taps, results, settings) {
   const coverage = active.length ? covered.length / active.length : 0;
   const houseMean = mean(results.map(r => r.liking).filter(Boolean));
 
-  // Data Tracking: Brand freshness curves
   const brandCurves = Object.entries(byBrand).map(([brand, rs]) => {
     const pts = rs
       .filter((r) => typeof r.ageDays === "number" && typeof r.liking === "number")
@@ -263,7 +264,6 @@ function analyze(taps, results, settings) {
     return { brand, pts, fit, crossDays, n: pts.length };
   }).sort((a, b) => b.n - a.n);
 
-  // Data Tracking: Line report card
   const lineStats = Object.entries(byLine).map(([line, rs]) => {
     const likes = rs.map((r) => r.liking).filter((x) => typeof x === "number");
     const brands = new Set(rs.map((r) => tapById[r.tapId]?.brand));
@@ -279,7 +279,6 @@ function analyze(taps, results, settings) {
     };
   }).sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0));
 
-  // Data Tracking: Taster stats
   const cell = {};
   for (const r of results) {
     const k = `${r.sessionId}|${r.tapId}`;
@@ -366,7 +365,8 @@ function Scatter({ curve, settings }) {
 }
 
 /* ------------------------------------------------------------------- screens */
-function Board({ a, settings, onGo }) {
+function Board({ a, settings, tasters, onGo }) {
+  const [selectedTasterId, setSelectedTasterId] = useState(tasters[0].id);
   const rows = a.tapStats.filter((s) => s.tap.active && !s.tap.onDeck).sort((x, y) => x.tap.line - y.tap.line);
   const due = rows.filter((s) => s.sinceCheck === null || s.sinceCheck > settings.coverageDays);
 
@@ -391,9 +391,23 @@ function Board({ a, settings, onGo }) {
             {a.houseMean === null ? "—" : a.houseMean.toFixed(2)}
           </div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
-          <button className="btn" data-p="1" onClick={onGo}>Start a Tasting Session</button>
+        
+        {/* NEW TASTER SELECTOR */}
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10 }}>
+          <select 
+            value={selectedTasterId} 
+            onChange={(e) => setSelectedTasterId(e.target.value)} 
+            style={{ width: 180 }}
+          >
+            {tasters.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <button className="btn" data-p="1" onClick={() => onGo(selectedTasterId)}>
+            Start a Tasting Session
+          </button>
         </div>
+
       </div>
 
       <div className="lc-sec">
@@ -525,18 +539,17 @@ function TasteCard({ tap, taster, draft, set, onSubmit, idx, total, elapsed }) {
   );
 }
 
-function Session({ taps, a, tasters, onSave, onExit }) {
+// INDIVIDUAL SESSION: Only loops through the beers, no longer swapping tasters
+function Session({ taps, a, taster, onSave, onExit }) {
   const [plan, setPlan] = useState(null);
   const [customIds, setCustom] = useState([]);
   const [idx, setIdx] = useState(0);
   const [phase, setPhase] = useState("taste");
-  const [ti, setTi] = useState(0);
   const [draft, setDraft] = useState(emptyDraft());
   const [pending, setPending] = useState([]);
   const [sessionId] = useState(() => `S-${todayISO()}-${uid().slice(0, 4)}`);
   const [t0] = useState(() => Date.now());
   const [elapsed, setElapsed] = useState(0);
-  const active = tasters.filter((t) => t.active !== false);
 
   useEffect(() => {
     const iv = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
@@ -548,7 +561,7 @@ function Session({ taps, a, tasters, onSave, onExit }) {
   if (!plan) {
     return (
       <div className="stack" style={{ maxWidth: 720 }}>
-        <div className="lc-h">Build the flight</div>
+        <div className="lc-h">Build the flight for {taster.name}</div>
         <div className="stack">
           {FLIGHTS.map((f) => (
             <button key={f.id} className="lc-card" style={{ textAlign: "left" }} onClick={() => setPlan(buildPlan(f.id, taps, a, []))}>
@@ -593,22 +606,20 @@ function Session({ taps, a, tasters, onSave, onExit }) {
     );
   }
 
-  const advanceTaster = (row) => {
+  // Advance to the next beer immediately, staying on the same taster
+  const advanceBeer = (row) => {
     const next = [...pending, row];
     setPending(next);
     setDraft(emptyDraft());
-    if (ti + 1 < active.length) { setTi(ti + 1); return; }
-    setTi(0);
     if (idx + 1 < total) { setIdx(idx + 1); }
     else setPhase("done");
   };
 
-  const taster = active[ti];
   return (
     <div style={{ maxWidth: 720 }}>
       <div className="rail">{plan.samples.map((_, i) => <i key={i} data-on={i < idx ? "2" : i === idx ? "1" : "0"} />)}</div>
       <TasteCard tap={tap} taster={taster} draft={draft} set={setDraft} idx={idx} total={total} elapsed={elapsed}
-        onSubmit={() => advanceTaster({
+        onSubmit={() => advanceBeer({
           id: uid(), sessionId, date: todayISO(), tapId: tap.id, tasterId: taster.id,
           ttb: draft.ttb, modalities: draft.modalities, liking: draft.liking, faults: draft.faults, action: draft.action, note: draft.note,
           pkg: tap.pkg, dlScore: tap.dlScore, ageDays: daysSince(tap.pkg), line: tap.line,
@@ -802,6 +813,10 @@ export default function LineCheck() {
   const [tasters] = useState(SEED_TASTERS);
   const [settings] = useState(DEFAULT_SETTINGS);
   const [results, setResults] = useState([]);
+  
+  // New state to hold the specific taster doing the current session
+  const [activeTasterId, setActiveTasterId] = useState(null);
+
   const dirty = useRef(false);
 
   useEffect(() => {
@@ -864,8 +879,11 @@ export default function LineCheck() {
       </div>
       <div className="lc-wrap">
         {syncStatus === "error" && <div className="alert" data-t="bad" style={{ marginBottom: 16 }}><div><div className="alert-b">Cloud Sync Failed</div><div className="alert-d">Check your internet connection or Firebase setup.</div></div></div>}
-        {tab === "board" && <Board a={a} settings={settings} onGo={() => setTab("session")} />}
-        {tab === "session" && <Session taps={taps} a={a} tasters={tasters} onSave={saveSession} onExit={() => setTab("board")} />}
+        
+        {tab === "board" && <Board a={a} settings={settings} tasters={tasters} onGo={(tid) => { setActiveTasterId(tid); setTab("session"); }} />}
+        
+        {tab === "session" && <Session taps={taps} a={a} taster={tasters.find(t => t.id === activeTasterId)} onSave={saveSession} onExit={() => setTab("board")} />}
+        
         {tab === "taps" && <Taps taps={taps} setTaps={setTaps} settings={settings} />}
         {tab === "data" && <Data a={a} results={results} taps={taps} settings={settings} tasters={tasters} />}
       </div>
