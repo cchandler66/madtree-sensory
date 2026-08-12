@@ -343,7 +343,8 @@ async function outboxFlush() {
   const left = [];
   for (const e of q) {
     try {
-      await setDoc(doc(db, e.path, e.id), e.data);
+      if (e.op === "delete") await deleteDoc(doc(db, e.path, e.id));
+      else await setDoc(doc(db, e.path, e.id), e.data);
     } catch {
       left.push(e);
     }
@@ -379,7 +380,10 @@ async function removeDoc(path, id) {
     await deleteDoc(doc(db, path, id));
     return true;
   } catch (err) {
-    console.warn("[linecheck] delete failed", path, id, err);
+    /* A delete that quietly fails is worse than one that waits: the row is
+       gone from this screen but comes straight back on the next snapshot. */
+    console.warn("[linecheck] delete parked in outbox", path, id, err);
+    outboxAdd({ path, id, op: "delete" });
     return false;
   }
 }
@@ -693,10 +697,24 @@ const CSS = `
   --gauge:'Fraunces',Georgia,serif;
   --r:10px; --r-sm:7px;
   background:var(--stout); color:var(--foam); font-family:var(--sans);
-  min-height:100vh; font-size:15px; line-height:1.5; letter-spacing:-0.005em;
+  min-height:100vh; font-size:15px; line-height:1.5; letter-spacing:-0.005em; text-align:left;
   -webkit-font-smoothing:antialiased; -webkit-tap-highlight-color:transparent;
 }
 .lc *, .lc *::before, .lc *::after { box-sizing:border-box; }
+
+/* ---- host page ----
+   This file is the whole app, so it takes the page with it. Vite's starter
+   index.css and App.css centre #root, pad it, cap it at 1280px and restyle
+   bare elements; any of that reaches in here and wins on specificity, which
+   is how a heading ends up centred and unreadable. Both files can be emptied
+   safely, but the app should not depend on that. */
+body { margin:0; padding:0; display:block; place-items:normal; min-width:0; background:#0B0D11; }
+#root { max-width:none; width:auto; margin:0; padding:0; text-align:left; display:block; }
+.lc h1, .lc h2, .lc h3, .lc h4, .lc h5, .lc p {
+  margin:0; padding:0; color:inherit; font:inherit; letter-spacing:inherit; text-align:inherit;
+}
+.lc a { color:inherit; font-weight:inherit; text-decoration:none; }
+
 .lc button { font:inherit; color:inherit; background:none; border:none; cursor:pointer; text-align:left; }
 .lc :focus-visible { outline:2px solid var(--foam); outline-offset:2px; border-radius:4px; }
 .lc input, .lc select, .lc textarea {
@@ -736,7 +754,7 @@ const CSS = `
 .h { display:flex; align-items:center; gap:12px; margin:0 0 12px; font-family:var(--mono); font-size:11px; font-weight:500; text-transform:uppercase; letter-spacing:0.16em; color:var(--head); }
 .h::after { content:""; flex:1; height:1px; background:var(--shank); }
 .h .h-act { margin-left:0; }
-.lede { color:var(--head); font-size:13.5px; max-width:70ch; margin:0 0 16px; }
+.lc .lede { color:var(--head); font-size:13.5px; max-width:70ch; margin:0 0 16px; }
 .sec { margin:30px 0; }
 .sec:first-child { margin-top:20px; }
 .mut { color:var(--head); } .dim { color:var(--dim); }
@@ -754,8 +772,8 @@ const CSS = `
 .hero::before { content:""; position:absolute; inset:0 auto 0 0; width:3px; background:var(--foam); opacity:0.85; }
 .hero-top { display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap; }
 .hero .eyebrow { color:var(--head); }
-.hero-day { font-family:var(--gauge); font-size:clamp(28px,5vw,40px); font-weight:600; line-height:1.02; letter-spacing:-0.025em; }
-.hero-sub { color:var(--head); font-size:13.5px; margin-top:6px; max-width:52ch; }
+.lc .hero-day { font-family:var(--gauge); font-size:clamp(28px,5vw,40px); font-weight:600; line-height:1.02; letter-spacing:-0.025em; }
+.lc .hero-sub { color:var(--head); font-size:13.5px; margin-top:6px; max-width:52ch; }
 .hero-cta { margin-left:auto; display:flex; flex-direction:column; align-items:stretch; gap:8px; min-width:210px; }
 .hero-meta { display:flex; gap:22px; margin-top:16px; padding-top:14px; border-top:1px solid var(--shank2); flex-wrap:wrap; }
 .stat b { display:block; font-family:var(--gauge); font-size:26px; font-weight:600; line-height:1.05; }
@@ -800,14 +818,23 @@ const CSS = `
 .wall-head { display:grid; grid-template-columns:44px minmax(0,1fr) 96px 60px 132px; gap:12px; padding:9px 14px; border-bottom:1px solid var(--shank2); font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:0.14em; color:var(--dim); background:var(--bench); }
 .wall-head span:nth-child(3), .wall-head span:nth-child(4) { text-align:right; }
 
+/* ---- the record: one filed score per row, removable ---- */
+.rrow { display:grid; grid-template-columns:38px minmax(0,1fr) 40px 34px; gap:10px; align-items:center; padding:9px 12px; border-bottom:1px solid var(--shank); }
+.rrow:last-child { border-bottom:0; }
+.rrow-n { font-family:var(--mono); font-size:11px; color:var(--dim); }
+.rrow-name { font-size:13.5px; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.rrow-sub { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-top:2px; font-family:var(--mono); font-size:10px; color:var(--dim); }
+.rrow-score { font-family:var(--gauge); font-size:19px; font-weight:600; text-align:right; font-variant-numeric:lining-nums tabular-nums; }
+.rrow-x { display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:var(--r-sm); border:1px solid transparent; color:var(--faint); font-size:17px; line-height:1; transition:color .13s, border-color .13s, background .13s; }
+.rrow-x:hover { color:var(--pull); border-color:rgba(226,87,74,0.4); background:rgba(226,87,74,0.08); }
+
 /* ---- freshness bar ---- */
 .fresh { position:relative; height:5px; border-radius:3px; background:var(--stout); border:1px solid var(--shank); overflow:hidden; }
 .fresh i { position:absolute; inset:0 auto 0 0; display:block; border-radius:2px; transition:width .4s ease; }
 .fresh-lab { display:flex; justify-content:space-between; gap:8px; font-family:var(--mono); font-size:9px; letter-spacing:0.06em; color:var(--dim); margin-top:5px; }
 
 /* ---- empty ---- */
-.empty { border:1px dashed var(--shank2); border-radius:var(--r); padding:30px 22px; text-align:center; }
-.empty b { display:block; font-family:var(--gauge); font-size:20px; font-weight:600; margin-bottom:6px; }
+.empty { border:1px dashed var(--shank2); border-radius:var(--r); padding:30px 22px; text-align:center; }.empty b { display:block; font-family:var(--gauge); font-size:20px; font-weight:600; margin-bottom:6px; }
 .empty p { color:var(--head); font-size:13.5px; margin:0 auto 16px; max-width:44ch; }
 
 /* ---- signals ---- */
@@ -965,7 +992,7 @@ const CSS = `
   .navbar button[data-on="1"] { color:var(--foam); background:var(--cellar); }
   .navbar b { font-family:var(--gauge); font-size:15px; font-weight:600; line-height:1; }
   .hero-cta { margin-left:0; width:100%; }
-  .hero-day { font-size:30px; }
+  .lc .hero-day { font-size:30px; }
   .opts-4 { grid-template-columns:repeat(2,1fr); }
   .hed { grid-template-columns:repeat(3,1fr); gap:7px; }
   .hed button { padding:14px 4px 11px; }
@@ -1656,7 +1683,7 @@ function Wall({ a, taps, tasters, settings, results, signals, me, onStart, api, 
         <div className="hero-top">
           <div style={{ minWidth: 0 }}>
             <div className="eyebrow">{today ? `${today.dayLabel} · ${today.label}` : "Off rotation"}</div>
-            <h1 className="hero-day">
+            <h1 className="hero-day" style={{ color: "var(--foam)" }}>
               {today ? today.groups.join(" & ") : upNext ? `${upNext.flight.label} in ${upNext.inDays} ${upNext.inDays === 1 ? "day" : "days"}` : "No flight scheduled"}
             </h1>
             <p className="hero-sub">
@@ -1799,6 +1826,7 @@ function Wall({ a, taps, tasters, settings, results, signals, me, onStart, api, 
             await api.saveTap({ ...openStat.tap, pkg, flag: null });
             toast("New keg logged");
           }}
+          onDeleteResult={async (id) => { await api.deleteResult(id); toast("Score deleted"); }}
         />
       )}
 
@@ -1823,7 +1851,7 @@ function Wall({ a, taps, tasters, settings, results, signals, me, onStart, api, 
   );
 }
 
-function KegSheet({ s, a, settings, tasters, results, onClose, onFlag, onClearFlag, onTasteNow, onNewKeg }) {
+function KegSheet({ s, a, settings, tasters, results, onClose, onFlag, onClearFlag, onTasteNow, onNewKeg, onDeleteResult }) {
   const [newPkg, setNewPkg] = useState("");
   const [showNew, setShowNew] = useState(false);
   const t = s.tap;
@@ -1912,11 +1940,20 @@ function KegSheet({ s, a, settings, tasters, results, onClose, onFlag, onClearFl
                     </td>
                     <td style={{ fontSize: 12 }}>
                       {c.rows.map((r) => (
-                        <div key={r.id} className="dim">
-                          {nameOf(r.tasterId)} <span className="lc-mono" style={{ color: "var(--foam)" }}>{r.liking}</span>
-                          {r.ttb === "no" && <span style={{ color: "var(--pull)" }}> not true</span>}
-                          {r.ttb === "marginal" && <span style={{ color: "var(--watch)" }}> marginal</span>}
-                          {r.action && <span> · {ACTION_BY_V[r.action] ? ACTION_BY_V[r.action].label.toLowerCase() : r.action}</span>}
+                        <div key={r.id} className="dim" style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <span style={{ minWidth: 0 }}>
+                            {nameOf(r.tasterId)} <span className="lc-mono" style={{ color: "var(--foam)" }}>{r.liking}</span>
+                            {r.ttb === "no" && <span style={{ color: "var(--pull)" }}> not true</span>}
+                            {r.ttb === "marginal" && <span style={{ color: "var(--watch)" }}> marginal</span>}
+                            {r.action && <span> · {ACTION_BY_V[r.action] ? ACTION_BY_V[r.action].label.toLowerCase() : r.action}</span>}
+                          </span>
+                          {onDeleteResult && (
+                            <button className="rrow-x" style={{ width: 20, height: 20, fontSize: 14, flex: "none" }}
+                              aria-label={`Delete ${nameOf(r.tasterId)}'s score of ${r.liking}`}
+                              onClick={() => {
+                                if (window.confirm(`Delete ${nameOf(r.tasterId)}'s score of ${r.liking} on ${fmtDate(r.date)}?`)) onDeleteResult(r.id);
+                              }}>&times;</button>
+                          )}
                         </div>
                       ))}
                     </td>
@@ -2510,7 +2547,7 @@ function Session({ taps, tasters, a, settings, me, results, sessions, api, kind,
       <div className="stack" style={{ maxWidth: 720 }}>
         <div>
           <div className="eyebrow">Session closed</div>
-          <h2 style={{ fontFamily: "var(--gauge)", fontSize: 32, fontWeight: 600, letterSpacing: "-0.025em", margin: "6px 0 4px" }}>
+          <h2 style={{ fontFamily: "var(--gauge)", fontSize: 32, fontWeight: 600, letterSpacing: "-0.025em", margin: "6px 0 4px", color: "var(--foam)" }}>
             {savedIds.length} {savedIds.length === 1 ? "score" : "scores"} filed
           </h2>
           <p className="lede">Everything below was written as you went. Nothing is waiting to be saved.</p>
@@ -2951,6 +2988,8 @@ function Data({ a, results, taps, tasters, settings, api, archive, toast }) {
      on this page. */
   const [loading, setLoading] = useState(false);
   const [openSettings, setOpenSettings] = useState(false);
+  const [recentQ, setRecentQ] = useState("");
+  const [showAllDays, setShowAllDays] = useState(false);
   const [s, setS] = useState(settings);
   useEffect(() => setS(settings), [settings]);
 
@@ -2988,6 +3027,44 @@ function Data({ a, results, taps, tasters, settings, api, archive, toast }) {
   const curves = a.brandCurves.filter((c) => c.n >= 4);
   const maxWeight = a.pareto.length ? a.pareto[0].weight : 1;
 
+  /* Everything filed, newest first, grouped by the day it was tasted. A
+     mis-scored sample, or a whole afternoon of trying the app out, has to be
+     removable or it sits in the mean forever. */
+  const days = useMemo(() => {
+    const q = recentQ.trim().toLowerCase();
+    const map = {};
+    for (const r of results) {
+      const t = a.tapById[r.tapId];
+      if (q) {
+        const hay = `${t ? t.brand : ""} ${t ? t.line : ""} ${nameOf(r.tasterId)} ${r.date}`.toLowerCase();
+        if (!hay.includes(q)) continue;
+      }
+      (map[r.date] ||= []).push(r);
+    }
+    return Object.entries(map)
+      .sort((x, y) => y[0].localeCompare(x[0]))
+      .map(([date, rows]) => ({
+        date,
+        rows: rows.slice().sort((x, y) => (x.at || "").localeCompare(y.at || "")),
+      }));
+  }, [results, recentQ, a.tapById, tasters]);
+
+  const shownDays = showAllDays ? days : days.slice(0, 3);
+
+  const removeOne = async (r) => {
+    const t = a.tapById[r.tapId];
+    const what = `${t ? `line ${t.line} ${t.brand}` : "this sample"} at ${r.liking}, ${fmtDate(r.date)}`;
+    if (!window.confirm(`Delete ${what}? It comes out of every mean, curve and signal straight away.`)) return;
+    await api.deleteResult(r.id);
+    toast("Score deleted");
+  };
+
+  const removeDay = async (day) => {
+    if (!window.confirm(`Delete all ${day.rows.length} ${day.rows.length === 1 ? "score" : "scores"} from ${fmtDate(day.date)}? This cannot be undone.`)) return;
+    for (const r of day.rows) await api.deleteResult(r.id);
+    toast(`${day.rows.length} deleted`);
+  };
+
   return (
     <div className="stack" style={{ gap: 0 }}>
       <div className="h">
@@ -3009,6 +3086,84 @@ function Data({ a, results, taps, tasters, settings, api, archive, toast }) {
         report and export below widens to the whole archive. Minimum retention is 24 months, which is what a real shelf-life
         analysis needs.
       </p>
+
+      {/* ---- the record ---- */}
+      <div className="sec">
+        <div className="h">
+          Every score filed
+          <span className="lc-mono dim" style={{ fontSize: 10.5, marginLeft: "auto" }}>{results.length} rows</span>
+        </div>
+        <p className="lede">
+          The raw record, newest first. Delete anything that should not be in the numbers &mdash; a mis-tap, a practice run,
+          a sample scored on the wrong line. It leaves every mean, curve and signal the moment it goes.
+        </p>
+        {results.length === 0 ? (
+          <Empty title="Nothing filed yet" body="Scores show up here the moment anyone submits one, from any phone." action={null} />
+        ) : (
+          <>
+            <input
+              value={recentQ} onChange={(e) => setRecentQ(e.target.value)}
+              placeholder="Find a brand, taster, line, or date"
+              style={{ maxWidth: 300, marginBottom: 12 }} aria-label="Search filed scores"
+            />
+            {days.length === 0 ? (
+              <div className="dim" style={{ fontSize: 13 }}>Nothing matches that.</div>
+            ) : (
+              <div className="stack" style={{ gap: 14 }}>
+                {shownDays.map((day) => (
+                  <div key={day.date}>
+                    <div className="row" style={{ marginBottom: 6 }}>
+                      <span className="eyebrow">{fmtDate(day.date)} &middot; {day.rows.length} {day.rows.length === 1 ? "score" : "scores"}</span>
+                      <button className="btn btn-sm" data-ghost="1" data-danger="1" style={{ marginLeft: "auto" }}
+                        onClick={() => removeDay(day)}>Delete the day</button>
+                    </div>
+                    <div className="wall">
+                      {day.rows.map((r) => {
+                        const t = a.tapById[r.tapId];
+                        const worst = (r.faults || []).reduce((m, f) => (m === null || f.i > m.i ? f : m), null);
+                        return (
+                          <div className="rrow" key={r.id}>
+                            <div className="rrow-n">{t ? String(t.line).padStart(2, "0") : "??"}</div>
+                            <div style={{ minWidth: 0 }}>
+                              <div className="rrow-name">{t ? t.brand : "Deleted tap"}</div>
+                              <div className="rrow-sub">
+                                <span>{nameOf(r.tasterId)}</span>
+                                {r.ttb === "no" && <span style={{ color: "var(--pull)" }}>not true to brand</span>}
+                                {r.ttb === "marginal" && <span style={{ color: "var(--watch)" }}>marginal</span>}
+                                {worst && (
+                                  <span className="chip" data-t={worst.i >= settings.faultPull ? "pull" : worst.i >= settings.faultInvestigate ? "watch" : ""}>
+                                    {FAULT_BY_ID[worst.id] ? FAULT_BY_ID[worst.id].label.split(" /")[0] : worst.id} {worst.i}
+                                  </span>
+                                )}
+                                {r.note && <span style={{ fontStyle: "italic" }}>&ldquo;{r.note}&rdquo;</span>}
+                              </div>
+                            </div>
+                            <div className="rrow-score" style={{
+                              color: !num(r.liking) ? "var(--dim)"
+                                : r.liking < settings.likingWatch ? "var(--pull)"
+                                : r.liking < settings.likingPass ? "var(--watch)" : "var(--pass)",
+                            }}>{num(r.liking) ? r.liking : "\u2014"}</div>
+                            <button className="rrow-x" onClick={() => removeOne(r)}
+                              aria-label={`Delete ${t ? t.brand : "this"} score by ${nameOf(r.tasterId)}`}>&times;</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+                {days.length > shownDays.length && (
+                  <button className="btn btn-sm" data-ghost="1" onClick={() => setShowAllDays(true)}>
+                    Show the other {days.length - shownDays.length} {days.length - shownDays.length === 1 ? "day" : "days"}
+                  </button>
+                )}
+                {showAllDays && days.length > 3 && (
+                  <button className="btn btn-sm" data-ghost="1" onClick={() => setShowAllDays(false)}>Show recent days only</button>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
 
       {/* ---- freshness ---- */}
       <div className="sec">
