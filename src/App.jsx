@@ -819,10 +819,41 @@ const CSS = `
 .sig-do b { color:var(--dim); font-weight:500; text-transform:uppercase; letter-spacing:0.13em; font-size:9.5px; display:block; margin-bottom:3px; }
 
 /* ---- tasting card ---- */
-.rail { display:flex; gap:3px; margin:0 0 18px; }
+.rail { display:flex; gap:3px; margin:0 0 14px; }
 .rail i { flex:1; height:3px; border-radius:2px; background:var(--shank); transition:background .25s; }
 .rail i[data-on="done"] { background:var(--dim); }
 .rail i[data-on="now"] { background:var(--foam); }
+
+/* ---- now tasting ----
+   This is not a blind panel. Which beer is in the glass has to stay on
+   screen the whole way down the card, so the identity block pins under the
+   header and condenses as you scroll into the questions. */
+.taste { position:relative; }
+.pour { position:sticky; top:var(--top-h,51px); z-index:30; margin:0 -16px 16px; padding:2px 16px 14px;
+  background:rgba(11,13,17,0.94); backdrop-filter:blur(14px) saturate(1.2);
+  border-bottom:1px solid transparent; transition:border-color .18s, padding .18s; }
+.pour[data-stuck="1"] { padding-top:9px; padding-bottom:9px; border-bottom-color:var(--shank); box-shadow:0 14px 22px -20px rgba(0,0,0,0.95); }
+.pour-top { display:flex; align-items:flex-start; gap:13px; }
+.pour-line { flex:none; display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:48px; padding:6px 7px 5px; border:1px solid var(--shank2); border-radius:var(--r-sm); background:var(--cellar); transition:min-width .18s, padding .18s; }
+.pour-line b { font-family:var(--gauge); font-size:25px; font-weight:600; line-height:1; letter-spacing:-0.02em; transition:font-size .18s; }
+.pour-line span { font-family:var(--mono); font-size:7.5px; text-transform:uppercase; letter-spacing:0.18em; color:var(--dim); margin-top:4px; }
+.pour[data-stuck="1"] .pour-line { min-width:38px; padding:4px 6px; }
+.pour[data-stuck="1"] .pour-line b { font-size:17px; }
+.pour[data-stuck="1"] .pour-line span { display:none; }
+.pour-id { min-width:0; flex:1; }
+.pour-eye { font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:0.2em; color:var(--dim); }
+.pour-brand { font-family:var(--gauge); font-size:clamp(26px,5.4vw,36px); font-weight:600; line-height:1.04; letter-spacing:-0.026em; margin-top:5px; overflow-wrap:anywhere; transition:font-size .18s, margin .18s; }
+.pour-style { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:0.15em; color:var(--head); margin-top:6px; }
+.pour-chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.pour[data-stuck="1"] .pour-eye, .pour[data-stuck="1"] .pour-style, .pour[data-stuck="1"] .pour-chips, .pour[data-stuck="1"] .pour-warm { display:none; }
+.pour[data-stuck="1"] .pour-brand { font-size:clamp(17px,4.2vw,20px); margin-top:0; padding-top:2px; }
+.pour-clock { flex:none; text-align:right; }
+.pour-count { font-family:var(--mono); font-size:9.5px; text-transform:uppercase; letter-spacing:0.13em; color:var(--dim); white-space:nowrap; }
+.pour-secs { font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:15px; margin-top:4px; }
+.pour-warm { font-family:var(--mono); font-size:8.5px; text-transform:uppercase; letter-spacing:0.11em; margin-top:3px; }
+.pour-next { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:0.12em; color:var(--dim); }
+.pour-next b { color:var(--head); font-weight:500; }
+.lineup { font-family:var(--mono); font-size:11px; color:var(--head); line-height:1.7; margin-top:8px; padding-top:8px; border-top:1px solid var(--shank); }
 .qhead { display:flex; align-items:baseline; gap:10px; margin-bottom:9px; }
 .qn { font-family:var(--gauge); font-size:13px; font-weight:600; color:var(--dim); }
 .qt { font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:0.14em; color:var(--head); }
@@ -935,6 +966,7 @@ const CSS = `
   .hed { grid-template-columns:repeat(3,1fr); gap:7px; }
   .hed button { padding:14px 4px 11px; }
   .hed button b { font-size:23px; }
+  .pour { margin-left:-13px; margin-right:-13px; padding-left:13px; padding-right:13px; }
   .jar { grid-template-columns:1fr; gap:6px; }
   .sheet { max-height:92vh; }
   .btn { padding:11px 15px; }
@@ -1981,15 +2013,38 @@ function buildPlan(kind, taps, a, customIds, settings) {
 
 const emptyDraft = () => ({ ttb: null, missWhere: [], liking: null, faults: [], jar: {}, action: null, note: "" });
 
-function TasteCard({ tap, stat, taster, draft, set, settings, idx, total, peers, tasters, onSubmit, onBack, onSkip }) {
+function TasteCard({ tap, stat, taster, draft, set, settings, idx, total, nextTap, peers, tasters, onSubmit, onBack, onSkip }) {
   const [t0] = useState(() => Date.now());
   const [secs, setSecs] = useState(0);
   const [showJar, setShowJar] = useState(false);
+  const [stuck, setStuck] = useState(false);
+  const sentinel = useRef(null);
 
   useEffect(() => {
     const iv = setInterval(() => setSecs(Math.floor((Date.now() - t0) / 1000)), 1000);
     return () => clearInterval(iv);
   }, [t0]);
+
+  /* A new sample starts at the top of the card, on the brand. Otherwise you
+     submit at the bottom of one beer and land in the middle of the next. */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const soft = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    try { window.scrollTo({ top: 0, behavior: soft ? "auto" : "smooth" }); } catch { window.scrollTo(0, 0); }
+  }, []);
+
+  /* The identity bar condenses once it pins, so the brand stays on screen
+     without eating a third of a phone. */
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined" || !sentinel.current) return;
+    const io = new IntersectionObserver(([e]) => setStuck(!e.isIntersecting), { rootMargin: "-54px 0px 0px 0px" });
+    io.observe(sentinel.current);
+    return () => io.disconnect();
+  }, []);
+
+  /* Long brand names have to survive a button label without wrapping it. */
+  const brandShort = !tap.brand ? "this tap"
+    : tap.brand.length > 20 ? `${tap.brand.slice(0, 19).trim()}\u2026` : tap.brand;
 
   const toggleFault = (id) => {
     const has = draft.faults.find((f) => f.id === id);
@@ -1997,6 +2052,11 @@ function TasteCard({ tap, stat, taster, draft, set, settings, idx, total, peers,
   };
   const setInt = (id, i) => set({ ...draft, faults: draft.faults.map((f) => (f.id === id ? { ...f, i } : f)) });
   const ready = draft.ttb && num(draft.liking) && draft.action;
+  const missing = [
+    !draft.ttb && "question 1",
+    !num(draft.liking) && "a liking score",
+    !draft.action && "a call",
+  ].filter(Boolean);
 
   /* What the limits would say about this score, shown only once the taster
      has committed to a number. It informs the call; it must not anchor it. */
@@ -2033,65 +2093,78 @@ function TasteCard({ tap, stat, taster, draft, set, settings, idx, total, peers,
   const warmed = secs >= 180;
 
   return (
-    <div className="stack" style={{ gap: 22 }}>
-      <div>
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-          <div style={{ minWidth: 0 }}>
-            <div className="eyebrow">Sample {idx + 1} of {total} · scoring as {taster.name}</div>
-            <h2 style={{ fontFamily: "var(--gauge)", fontSize: "clamp(26px,5vw,36px)", fontWeight: 600, lineHeight: 1.05, letterSpacing: "-0.025em", margin: "6px 0 6px" }}>
-              {tap.brand || "Untitled tap"}
-            </h2>
-            <div className="row" style={{ gap: 7 }}>
-              <span className="chip" data-t="solid">Line {tap.line}</span>
-              <span className="chip">{tap.style}</span>
+    <div className="taste">
+      <div ref={sentinel} aria-hidden="true" style={{ height: 1 }} />
+      <div className="pour" data-stuck={stuck ? "1" : "0"}>
+        <div className="pour-top">
+          <div className="pour-line" aria-label={`Line ${tap.line}`}>
+            <b>{String(tap.line).padStart(2, "0")}</b>
+            <span>line</span>
+          </div>
+          <div className="pour-id">
+            <div className="pour-eye">Now tasting</div>
+            <div className="pour-brand">{tap.brand || "Untitled tap"}</div>
+            <div className="pour-style">{tap.style || "no style on file"}</div>
+            <div className="pour-chips">
               {stat && stat.dl !== null && <span className="chip">release {stat.dl.toFixed(1)}</span>}
               {stat && stat.fresh.age !== null && (
                 <span className="chip" style={{ color: freshColor(stat.fresh.frac), borderColor: "var(--shank2)" }}>
                   day {stat.fresh.age} of {stat.fresh.shelf}
                 </span>
               )}
+              {tap.pkg && <span className="chip">packaged {fmtDate(tap.pkg)}</span>}
+              <span className="chip">scoring as {taster.name.split(" ")[0]}</span>
             </div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div className="lc-mono" style={{ fontSize: 15, color: warmed ? "var(--foam)" : "var(--dim)" }}>
+          <div className="pour-clock">
+            <div className="pour-count">{idx + 1} / {total}</div>
+            <div className="pour-secs" style={{ color: warmed ? "var(--foam)" : "var(--dim)" }}>
               {Math.floor(secs / 60)}:{String(secs % 60).padStart(2, "0")}
             </div>
-            <div className="lc-mono" style={{ fontSize: 9, textTransform: "uppercase", letterSpacing: "0.1em", color: warmed ? "var(--watch)" : "var(--faint)", marginTop: 3 }}>
+            <div className="pour-warm" style={{ color: warmed ? "var(--watch)" : "var(--faint)" }}>
               {warmed ? "nose it warm" : "cold pass"}
             </div>
           </div>
         </div>
-
-        {tap.flag && (
-          <div className="sig" data-sev="watch" style={{ marginTop: 12 }}>
-            <div className="sig-ic">!</div>
-            <div>
-              <div className="sig-t">Flagged: {tap.flag.reason}</div>
-              <div className="sig-d">{tap.flag.by} raised this on {fmtDate(tap.flag.date)}. Submitting a score clears it.</div>
-            </div>
-          </div>
-        )}
-
-        {stat && stat.last && (
-          <div className="dim" style={{ fontSize: 12.5, marginTop: 12 }}>
-            Last check {fmtAgo(stat.sinceCheck)} came in at <b className="lc-mono" style={{ color: "var(--foam)" }}>{stat.last.mean === null ? "\u2014" : stat.last.mean.toFixed(1)}</b>
-            {stat.last.faults.length > 0 && <> with {stat.last.faults.map((f) => FAULT_BY_ID[f.id] ? FAULT_BY_ID[f.id].label.split(" /")[0].toLowerCase() : f.id).join(", ")}</>}.
-          </div>
-        )}
-
-        {peers.length > 0 && (
-          <div className="row" style={{ marginTop: 12, gap: 10 }}>
-            <Who tasters={tasters.filter((t) => t.active)} ids={peers.map((p) => p.tasterId)} />
-            <span className="dim" style={{ fontSize: 12 }}>
-              {peers.length} {peers.length === 1 ? "score" : "scores"} already in on this one
-            </span>
-          </div>
-        )}
       </div>
+
+      <div className="stack" style={{ gap: 22 }}>
+      {(tap.flag || (stat && stat.last) || peers.length > 0) && (
+        <div className="stack" style={{ gap: 10 }}>
+          {tap.flag && (
+            <div className="sig" data-sev="watch">
+              <div className="sig-ic">!</div>
+              <div>
+                <div className="sig-t">Flagged: {tap.flag.reason}</div>
+                <div className="sig-d">{tap.flag.by} raised this on {fmtDate(tap.flag.date)}. Submitting a score clears it.</div>
+              </div>
+            </div>
+          )}
+
+          {stat && stat.last && (
+            <div className="dim" style={{ fontSize: 12.5 }}>
+              Last check on {tap.brand || "this tap"} {fmtAgo(stat.sinceCheck)} came in at <b className="lc-mono" style={{ color: "var(--foam)" }}>{stat.last.mean === null ? "\u2014" : stat.last.mean.toFixed(1)}</b>
+              {stat.last.faults.length > 0 && <> with {stat.last.faults.map((f) => FAULT_BY_ID[f.id] ? FAULT_BY_ID[f.id].label.split(" /")[0].toLowerCase() : f.id).join(", ")}</>}.
+            </div>
+          )}
+
+          {peers.length > 0 && (
+            <div className="row" style={{ gap: 10 }}>
+              <Who tasters={tasters.filter((t) => t.active)} ids={peers.map((p) => p.tasterId)} />
+              <span className="dim" style={{ fontSize: 12 }}>
+                {peers.length} {peers.length === 1 ? "score" : "scores"} already in on this one
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 1 — true to brand */}
       <div>
-        <div className="qhead"><span className="qn">1</span><span className="qt">True to brand</span></div>
+        <div className="qhead">
+          <span className="qn">1</span>
+          <span className="qt">True to {brandShort}</span>
+        </div>
         <div className="opts opts-3">
           {TTB.map((o) => (
             <button key={o.v} className="opt" data-on={draft.ttb === o.v ? "1" : "0"} data-t={o.tone}
@@ -2207,7 +2280,11 @@ function TasteCard({ tap, stat, taster, draft, set, settings, idx, total, peers,
 
       {/* 5 — the call */}
       <div>
-        <div className="qhead"><span className="qn">5</span><span className="qt">Your call</span></div>
+        <div className="qhead">
+          <span className="qn">5</span>
+          <span className="qt">Your call on line {tap.line}</span>
+          <span className="qopt">{tap.brand}</span>
+        </div>
         {hint && (
           <div className="verd" style={{ marginBottom: 10 }}>
             <div style={{
@@ -2241,9 +2318,18 @@ function TasteCard({ tap, stat, taster, draft, set, settings, idx, total, peers,
         <button className="btn" data-ghost="1" onClick={onBack} disabled={idx === 0}>Back</button>
         <button className="btn" data-ghost="1" onClick={onSkip}>Skip</button>
         <button className="btn btn-lg" data-p="1" style={{ flex: 1 }} disabled={!ready} onClick={onSubmit}>
-          {ready ? (idx + 1 === total ? "Save and finish" : "Save and pour the next") : "Brand, liking and a call are required"}
+          {ready
+            ? (idx + 1 === total ? `File ${brandShort} and finish` : `File ${brandShort}, pour the next`)
+            : `Still need ${missing.join(", ")}`}
         </button>
       </div>
+
+      {nextTap && (
+        <div className="pour-next">
+          Next: <b>line {String(nextTap.line).padStart(2, "0")} &middot; {nextTap.brand}</b>
+        </div>
+      )}
+    </div>
     </div>
   );
 }
@@ -2304,7 +2390,14 @@ function Session({ taps, tasters, a, settings, me, results, sessions, api, kind,
   if (phase === "plan" || !plan) {
     const today = todaysFlight();
     const live = sessions.filter((s) => s.date === todayISO());
-    const preview = (k) => buildPlan(k, taps, a, customIds, settings).length;
+    /* Naming the beers on the button. Nobody should have to start a flight
+       to find out what is in it. */
+    const preview = (k) => buildPlan(k, taps, a, customIds, settings);
+    const lineup = (ids) => {
+      const named = ids.map((id) => a.tapById[id]).filter(Boolean);
+      const head = named.slice(0, 5).map((t) => `${String(t.line).padStart(2, "0")} ${t.brand}`).join("  \u00b7  ");
+      return named.length > 5 ? `${head}  \u00b7  +${named.length - 5} more` : head;
+    };
 
     return (
       <div className="stack" style={{ maxWidth: 720 }}>
@@ -2351,26 +2444,27 @@ function Session({ taps, tasters, a, settings, me, results, sessions, api, kind,
         <div className="h">Build the flight</div>
         <div className="stack" style={{ gap: 10 }}>
           {FLIGHTS.map((f) => {
-            const n = preview(f.id);
+            const ids = preview(f.id);
             const isToday = today && today.id === f.id;
             return (
-              <button key={f.id} className="card" style={{ borderColor: isToday ? "var(--shank2)" : undefined }} onClick={() => start(f.id)} disabled={!n}>
+              <button key={f.id} className="card" style={{ borderColor: isToday ? "var(--shank2)" : undefined }} onClick={() => start(f.id)} disabled={!ids.length}>
                 <div className="row">
                   <b style={{ fontSize: 15 }}>{f.label}</b>
                   <span className="chip">{f.dayLabel}</span>
                   {isToday && <span className="chip" data-t="solid">today</span>}
-                  <span className="lc-mono dim" style={{ marginLeft: "auto", fontSize: 12 }}>{n} samples</span>
+                  <span className="lc-mono dim" style={{ marginLeft: "auto", fontSize: 12 }}>{ids.length} samples</span>
                 </div>
-                <div className="dim" style={{ fontSize: 12.5, marginTop: 6 }}>{f.groups.join(" · ")}</div>
-                <div className="mut" style={{ fontSize: 12.5, marginTop: 4 }}>{f.note}</div>
+                {ids.length > 0 && <div className="lineup">{lineup(ids)}</div>}
+                <div className="mut" style={{ fontSize: 12.5, marginTop: 6 }}>{f.note}</div>
               </button>
             );
           })}
-          <button className="card" onClick={() => start("due")} disabled={!preview("due")}>
+          <button className="card" onClick={() => start("due")} disabled={!preview("due").length}>
             <div className="row">
               <b style={{ fontSize: 15 }}>Everything overdue</b>
-              <span className="lc-mono dim" style={{ marginLeft: "auto", fontSize: 12 }}>{preview("due")} samples</span>
+              <span className="lc-mono dim" style={{ marginLeft: "auto", fontSize: 12 }}>{preview("due").length} samples</span>
             </div>
+            {preview("due").length > 0 && <div className="lineup">{lineup(preview("due"))}</div>}
             <div className="mut" style={{ fontSize: 12.5, marginTop: 6 }}>
               Anything outside the {settings.coverageDays} day window, plus anything flagged, in palate order.
             </div>
@@ -2527,12 +2621,19 @@ function Session({ taps, tasters, a, settings, me, results, sessions, api, kind,
         </span>
       </div>
       <div className="rail" aria-label={`Sample ${idx + 1} of ${plan.length}`}>
-        {plan.map((_, i) => <i key={i} data-on={i < idx ? "done" : i === idx ? "now" : "next"} />)}
+        {plan.map((id, i) => {
+          const t = a.tapById[id];
+          return (
+            <i key={i} data-on={i < idx ? "done" : i === idx ? "now" : "next"}
+              title={t ? `${i + 1}. line ${t.line} \u00b7 ${t.brand}` : `Sample ${i + 1}`} />
+          );
+        })}
       </div>
       <TasteCard
         key={tapId}
         tap={tap} stat={stat} taster={me} draft={draft} set={setDraft} settings={settings}
-        idx={idx} total={plan.length} peers={peers} tasters={tasters}
+        idx={idx} total={plan.length} nextTap={a.tapById[plan[idx + 1]] || null}
+        peers={peers} tasters={tasters}
         onSubmit={submit}
         onBack={() => { setDraft(emptyDraft()); setIdx(Math.max(0, idx - 1)); }}
         onSkip={advance}
@@ -3171,6 +3272,18 @@ export default function App() {
     setTab("taste");
   }, [me]);
 
+  /* Anything that pins below the header needs to know how tall it is, and
+     that changes with the breakpoint and again when the fonts land. */
+  const topRef = useCallback((node) => {
+    if (!node || typeof document === "undefined") return;
+    const apply = () => document.documentElement.style.setProperty("--top-h", `${node.offsetHeight}px`);
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(apply);
+    ro.observe(node);
+    return () => ro.disconnect();
+  }, []);
+
   if (!ready) {
     return (
       <div className="lc">
@@ -3191,7 +3304,7 @@ export default function App() {
     <div className="lc">
       <style>{CSS}</style>
 
-      <header className="top">
+      <header className="top" ref={topRef}>
         <div className="top-in">
           <div className="mark">
             <b>Line Check</b>
