@@ -684,7 +684,7 @@ const CSS = `
 
 .lc {
   --stout:#0B0D11; --cellar:#13161C; --bench:#1A1E26; --raise:#222732;
-  --shank:#262B35; --shank2:#39404E;
+  --shank:#2C313C; --shank2:#434B5B;
   --foam:#F2EFE6; --head:#99A2B1; --dim:#616A79; --faint:#454D5B;
   --pass:#55B98A; --watch:#E3B04B; --pull:#E2574A; --line:#A08BD6; --info:#6E9FD4;
   --beer:#D9903A;
@@ -746,14 +746,18 @@ const CSS = `
 .card { background:var(--cellar); border:1px solid var(--shank); border-radius:var(--r); padding:15px; }
 .grid { display:grid; gap:10px; }
 
-/* ---- hero: today's assignment ---- */
-.hero { border:1px solid var(--shank); border-radius:var(--r); background:linear-gradient(160deg,var(--cellar),var(--stout) 70%); padding:20px 20px 18px; margin:18px 0 24px; position:relative; overflow:hidden; }
-.hero::before { content:""; position:absolute; inset:0 auto 0 0; width:2px; background:var(--foam); opacity:0.55; }
+/* ---- hero: today's assignment ----
+   This has to read as a panel from across the bar, not as a paragraph
+   floating on the page, so it sits a full step above the background and
+   carries a real edge rather than a hairline. */
+.hero { border:1px solid var(--shank2); border-radius:var(--r); background:linear-gradient(160deg,var(--bench),var(--cellar) 64%); padding:20px 20px 18px; margin:18px 0 24px; position:relative; overflow:hidden; box-shadow:0 20px 44px -34px rgba(0,0,0,0.95); }
+.hero::before { content:""; position:absolute; inset:0 auto 0 0; width:3px; background:var(--foam); opacity:0.85; }
 .hero-top { display:flex; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+.hero .eyebrow { color:var(--head); }
 .hero-day { font-family:var(--gauge); font-size:clamp(28px,5vw,40px); font-weight:600; line-height:1.02; letter-spacing:-0.025em; }
 .hero-sub { color:var(--head); font-size:13.5px; margin-top:6px; max-width:52ch; }
 .hero-cta { margin-left:auto; display:flex; flex-direction:column; align-items:stretch; gap:8px; min-width:210px; }
-.hero-meta { display:flex; gap:22px; margin-top:16px; padding-top:14px; border-top:1px solid var(--shank); flex-wrap:wrap; }
+.hero-meta { display:flex; gap:22px; margin-top:16px; padding-top:14px; border-top:1px solid var(--shank2); flex-wrap:wrap; }
 .stat b { display:block; font-family:var(--gauge); font-size:26px; font-weight:600; line-height:1.05; }
 .stat span { font-family:var(--mono); font-size:9.5px; text-transform:uppercase; letter-spacing:0.13em; color:var(--dim); }
 
@@ -793,7 +797,7 @@ const CSS = `
 .wrow-sub { font-family:var(--mono); font-size:9.5px; text-transform:uppercase; letter-spacing:0.1em; color:var(--dim); margin-top:3px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .wrow-score { font-family:var(--gauge); font-size:23px; font-weight:600; line-height:1; text-align:right; }
 .wrow-score small { display:block; font-family:var(--mono); font-size:8.5px; font-weight:400; letter-spacing:0.1em; text-transform:uppercase; color:var(--dim); margin-top:4px; }
-.wall-head { display:grid; grid-template-columns:44px minmax(0,1fr) 96px 60px 132px; gap:12px; padding:8px 14px; border-bottom:1px solid var(--shank); font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:0.14em; color:var(--faint); background:var(--stout); }
+.wall-head { display:grid; grid-template-columns:44px minmax(0,1fr) 96px 60px 132px; gap:12px; padding:9px 14px; border-bottom:1px solid var(--shank2); font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:0.14em; color:var(--dim); background:var(--bench); }
 .wall-head span:nth-child(3), .wall-head span:nth-child(4) { text-align:right; }
 
 /* ---- freshness bar ---- */
